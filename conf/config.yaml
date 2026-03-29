@@ -1,1 +1,13 @@
+catalog: dev
+schema: ecommerce
 
+paths:
+  bronze_base: /Volumes/dev/ecommerce/bronze
+
+ingestion:
+  users_per_day: 500
+  products_per_day: 100
+
+tables:
+  users_silver: silver_users
+  users_gold: gold_user_stats
