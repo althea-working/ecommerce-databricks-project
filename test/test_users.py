@@ -8,6 +8,6 @@ import src.common.utils as utils
 
 print("USING FILE:", utils.__file__)
 
-# 强行读源码看看
+# check source
 import inspect
 print(inspect.getsource(utils.load_config))
