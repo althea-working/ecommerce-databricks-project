@@ -3,6 +3,7 @@ schema: ecommerce
 
 paths:
   bronze_base: /Volumes/dev/ecommerce/bronze
+  silver_schema: dev.ecommerce
 
 ingestion:
   users_per_day: 500
