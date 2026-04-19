@@ -1,5 +1,5 @@
 from pyspark.sql import functions as F
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, DataFrame
 
 from src.common.logger import get_logger
 from src.common.utils import load_config
@@ -11,26 +11,68 @@ config = load_config()
 # =========================
 # transform
 # =========================
-def transform_events(df):
+def transform_events(df: DataFrame, spark: SparkSession):
     """
-    Silver layer cleaning
+    Silver layer cleaning & standardization
     """
-    valid_event_types = ["view", "add_to_cart", "purchase", "login"]
+    valid_event_types = [
+        "login",
+        "impression",
+        "view",
+        "add_to_cart",
+        "purchase",
+        "logout"
+    ]
 
-    return (
+    bronze_base = config["paths"]["bronze_base"]
+
+    users_df = spark.read.format("delta").load(f"{bronze_base}/users") \
+        .select("user_id", "signup_time")
+
+    products_df = spark.read.format("delta").load(f"{bronze_base}/products") \
+        .select("product_id", "created_at")
+
+    df = (
         df
-        # Key columns not null
+        # basic validation
+        .filter(F.col("event_id").isNotNull())
         .filter(F.col("user_id").isNotNull())
-        .filter(F.col("product_id").isNotNull())
+        .filter(F.col("session_id").isNotNull())
         .filter(F.col("event_time").isNotNull())
-        # Time resonable
-        .filter(F.col("event_time") <= F.current_timestamp())
-        # Normal event type
+
+        # event_type
         .filter(F.col("event_type").isin(valid_event_types))
-        # Standardize device
-        .withColumn("device", F.lower(F.col("device")))
+
+        # product rule
+        .filter(
+            (F.col("event_type").isin("login", "logout") & F.col("product_id").isNull()) |
+            (~F.col("event_type").isin("login", "logout") & F.col("product_id").isNotNull())
+        )
+
+        # device
+        .filter(F.col("device").isin("mobile", "web"))
+
+        # time sanity
+        .filter(F.col("event_time") <= F.current_timestamp())
+
+        # dedup
+        .dropDuplicates(["event_id"])
     )
 
+    # user constraint
+    df = df.join(users_df, "user_id", "left") \
+           .filter(F.col("event_time") >= F.col("signup_time")) \
+           .drop("signup_time")
+
+    # product constraint
+    df = df.join(products_df, "product_id", "left") \
+           .filter(
+               (F.col("product_id").isNull()) |
+               (F.col("event_time") >= F.col("created_at"))
+           ) \
+           .drop("created_at")
+
+    return df
 
 # =========================
 # main
@@ -38,38 +80,51 @@ def transform_events(df):
 def ingest_events(spark: SparkSession, run_date_str: str):
 
     bronze_base = config["paths"]["bronze_base"]
-    silver_schema = config["paths"]["silver_schema"]
+    ecommerce_schema = config["paths"]["ecommerce_schema"]
 
-    events_bronze_path = f"{bronze_base}/events"
-    target_table = f"{silver_schema}.silver_events"
+    source_path = f"{bronze_base}/events"
+    target_table = f"{ecommerce_schema}.silver_events"
 
     logger.info(f"RUN_DATE = {run_date_str}")
-    logger.info(f"Reading from {events_bronze_path}")
-    logger.info(f"Writing to {target_table}")
+    logger.info(f"Source = {source_path}")
+    logger.info(f"Target = {target_table}")
 
     try:
-        # Load from bronze (only run_date partition)
-        df = spark.read.format("delta") \
-            .load(events_bronze_path) \
+        # -------------------------
+        # 1. read only one partition
+        # -------------------------
+        df = (
+            spark.read.format("delta")
+            .load(source_path)
             .where(f"event_date = '{run_date_str}'")
+        )
 
-        logger.info(f"Input rows = {df.count()}")
+        input_cnt = df.count()
+        logger.info(f"Input rows = {input_cnt}")
 
-        # Cleaning
-        df_clean = transform_events(df)
+        # -------------------------
+        # 2. transform
+        # -------------------------
+        df_clean = transform_events(df, spark)
 
-        logger.info(f"Output rows = {df_clean.count()}")
+        output_cnt = df_clean.count()
+        logger.info(f"Output rows = {output_cnt}")
 
-        # Writing to silver table
-        df_clean.write.format("delta") \
-            .mode("overwrite") \
-            .option("replaceWhere", f"event_date = '{run_date_str}'") \
-            .partitionBy("event_date") \
+        # -------------------------
+        # 3. write (idempotent)
+        # -------------------------
+        (
+            df_clean
+            .repartition(1, "event_date")
+            .write.format("delta")
+            .mode("overwrite")
+            .option("replaceWhere", f"event_date = '{run_date_str}'")
+            .partitionBy("event_date")
             .saveAsTable(target_table)
+        )
 
-        logger.info("Silver events ingestion completed")
+        logger.info("✅ Silver events ingestion completed")
 
     except Exception as e:
-        logger.error(f"Events ingestion failed: {e}", exc_info=True)
+        logger.error(f"❌ Silver events ingestion failed: {e}", exc_info=True)
         raise
-    

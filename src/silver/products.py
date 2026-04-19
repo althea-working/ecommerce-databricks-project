@@ -33,9 +33,10 @@ def transform_products(df: DataFrame):
 def ingest_products(spark: SparkSession, run_date_str: str):
 
     bronze_base = config["paths"]["bronze_base"]
+    ecommerce_schema = config["paths"]["ecommerce_schema"]
 
     products_bronze_path = f"{bronze_base}/products"
-    target_table = "dev.ecommerce.silver_products"
+    target_table = f"{ecommerce_schema}.silver_products"
 
     logger.info(f"RUN_DATE = {run_date_str}")
     logger.info(f"Reading from {products_bronze_path}")
