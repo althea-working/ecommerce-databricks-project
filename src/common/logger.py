@@ -1,5 +1,10 @@
 import logging
 import sys
+import os
+import time
+
+os.environ["TZ"] = "Asia/Shanghai"
+time.tzset()
 
 def get_logger(name: str):
 

@@ -37,9 +37,10 @@ def ingest_users_silver(spark: SparkSession, run_date_str: str):
     """
 
     bronze_base = config["paths"]["bronze_base"]
+    ecommerce_schema = config["paths"]["ecommerce_schema"]
     bronze_path = f"{bronze_base}/users"
 
-    target_table = "dev.ecommerce.silver_users"
+    target_table = f"{ecommerce_schema}.silver_users"
 
     logger.info(f"RUN_DATE = {run_date_str}")
     logger.info(f"Source path = {bronze_path}")
