@@ -203,7 +203,7 @@ def ingest_user_profile_snapshot(spark: SparkSession, run_date_str: str, webhook
     validator = UserProfileValidator(
         spark,
         table_name=current_table,
-        webhook_url
+        webhook_url=webhook_url
     )
 
     validator.run()
